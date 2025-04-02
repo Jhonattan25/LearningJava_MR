@@ -1,0 +1,157 @@
+package com.learning.webflux.app.controller;
+
+import com.learning.webflux.app.models.documents.Category;
+import com.learning.webflux.app.models.documents.Product;
+import com.learning.webflux.app.models.services.ProductService;
+import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.validation.BindingResult;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.support.SessionStatus;
+import org.thymeleaf.spring6.context.webflux.ReactiveDataDriverContextVariable;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+
+import java.time.Duration;
+import java.time.LocalDateTime;
+
+@SessionAttributes("product")
+@Controller
+public class ProductController {
+    private static final Logger log = LoggerFactory.getLogger(ProductController.class);
+
+    @ModelAttribute("categories")
+    public Flux<Category> categories() {
+        return productService.findAllCategory();
+    }
+
+    private final ProductService productService;
+
+    public ProductController(ProductService productService) {
+        this.productService = productService;
+    }
+
+    @GetMapping({"/list", "/"})
+    public Mono<String> list(Model model) {
+        Flux<Product> products = productService.findAllWithNameUpperCase();
+        products.subscribe(product -> log.info(product.getName()));
+
+        model.addAttribute("title", "Listado de productos");
+        model.addAttribute("products", products);
+
+        return Mono.just("list");
+    }
+
+    @GetMapping("/form")
+    public Mono<String> create(Model model, SessionStatus sessionStatus) {
+
+        sessionStatus.setComplete();
+
+        model.addAttribute("title", "Formulario de producto");
+        model.addAttribute("button", "Crear");
+        model.addAttribute("product", new Product());
+
+        return Mono.just("form");
+    }
+
+    @GetMapping("/form/{id}")
+    public Mono<String> edit(@PathVariable String id, Model model) {
+        Mono<Product> productMono = productService.findById(id)
+                .doOnNext(p -> log.info("Producto: " + p.getName()))
+                .defaultIfEmpty(new Product());
+
+        model.addAttribute("title", "Editar Producto");
+        model.addAttribute("button", "Editar");
+        model.addAttribute("product", productMono);
+
+        return Mono.just("form");
+    }
+
+    @GetMapping("/form-v2/{id}")
+    public Mono<String> editV2(@PathVariable String id, Model model) {
+        return productService.findById(id)
+                .doOnNext(p -> {
+                    log.info("Producto: " + p.getName());
+                    model.addAttribute("title", "Editar Producto");
+                    model.addAttribute("button", "Editar");
+                    model.addAttribute("product", p);
+                })
+                .defaultIfEmpty(new Product())
+                .flatMap(p -> {
+                    if (p.getId() == null) {
+                        return Mono.error(() -> new InterruptedException("No existe el producto"));
+                    }
+                    return Mono.just(p);
+                })
+                .then(Mono.just("form"))
+                .onErrorResume(ex -> Mono.just("redirect:/list?error=no+existe+el+producto"));
+    }
+
+    @PostMapping("/form")
+    public Mono<String> save(@Valid Product newProduct, BindingResult result, Model model) {
+
+        if (result.hasErrors()) {
+            model.addAttribute("title", "Errores en formulario producto");
+            model.addAttribute("button", "Guardar");
+            return Mono.just("form");
+        }
+
+        if (newProduct.getCreateAt() == null) {
+            newProduct.setCreateAt(LocalDateTime.now());
+        }
+        return productService.save(newProduct).doOnNext(product ->
+                        log.info("Saved product: {} Id: {}", product.getName(), product.getId()))
+                .thenReturn("redirect:/list?success=producto+guardado+con+exito");
+    }
+
+    @GetMapping("delete/{id}")
+    public Mono<String> delete(@PathVariable String id) {
+        return productService.findById(id)
+                .defaultIfEmpty(new Product())
+                .flatMap(p -> {
+                    if (p.getId() == null) {
+                        return Mono.error(new InterruptedException("No existe el producto a eliminar"));
+                    }
+                    log.info("Eliminando producto id: {}", p.getId());
+                    log.info("Eliminando producto: {}", p.getName());
+                    return productService.delete(p);
+                })
+                .then(Mono.just("redirect:/list?success=producto+eliminado+con+exito"))
+                .onErrorResume(ex -> Mono.just("redirect:/list?error=no+existe+el+producto+a+eliminar"));
+    }
+
+    @GetMapping("/list-data-driver")
+    public String listDataDriver(Model model) {
+        Flux<Product> products = productService.findAllWithNameUpperCase()
+                .delayElements(Duration.ofSeconds(1));
+        products.subscribe(product -> log.info(product.getName()));
+
+        model.addAttribute("title", "Listado de productos");
+        model.addAttribute("products", new ReactiveDataDriverContextVariable(products, 1));
+
+        return "list";
+    }
+
+    @GetMapping("/list-full")
+    public String listFull(Model model) {
+        Flux<Product> products = productService.findAllWithNameUpperCaseRepeat();
+
+        model.addAttribute("title", "Listado de productos");
+        model.addAttribute("products", products);
+
+        return "list";
+    }
+
+    @GetMapping("/list-chunked")
+    public String listChunked(Model model) {
+        Flux<Product> products = productService.findAllWithNameUpperCaseRepeat();
+
+        model.addAttribute("title", "Listado de productos");
+        model.addAttribute("products", products);
+
+        return "list-chunked";
+    }
+}

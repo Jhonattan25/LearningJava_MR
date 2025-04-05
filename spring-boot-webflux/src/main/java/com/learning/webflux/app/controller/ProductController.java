@@ -99,12 +99,20 @@ public class ProductController {
             return Mono.just("form");
         }
 
-        if (newProduct.getCreateAt() == null) {
-            newProduct.setCreateAt(LocalDateTime.now());
-        }
-        return productService.save(newProduct).doOnNext(product ->
-                        log.info("Saved product: {} Id: {}", product.getName(), product.getId()))
-                .thenReturn("redirect:/list?success=producto+guardado+con+exito");
+        return productService.findCategoryById(newProduct.getCategory().getId())
+                .flatMap(c -> {
+                    if (newProduct.getCreateAt() == null) {
+                        newProduct.setCreateAt(LocalDateTime.now());
+                    }
+                    newProduct.setCategory(c);
+                    return productService.save(newProduct)
+                            .doOnNext(product -> {
+                                log.info("Assigned category: {} Id: {}", product.getCategory().getName(),
+                                        product.getCategory().getId());
+                                log.info("Saved product: {} Id: {}", product.getName(), product.getId());
+                            })
+                            .thenReturn("redirect:/list?success=producto+guardado+con+exito");
+                });
     }
 
     @GetMapping("delete/{id}")

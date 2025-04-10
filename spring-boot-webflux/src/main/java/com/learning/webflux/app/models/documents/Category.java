@@ -9,7 +9,6 @@ public class Category {
     @Id
     @NotEmpty
     private String id;
-    @NotEmpty
     private String name;
 
     public Category() {

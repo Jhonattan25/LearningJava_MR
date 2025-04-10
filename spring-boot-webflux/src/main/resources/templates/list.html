@@ -27,10 +27,10 @@
     </thead>
     <tbody>
     <tr th:each="product: ${products}">
-        <td th:text="${product.id}"></td>
+        <td><a th:href="@{/get/} + ${product.id}" th:text="${#strings.abbreviate(product.id, 10)}"></a></td>
         <td th:text="${product.name}"></td>
-        <td th:text="${product.price}"></td>
-        <td th:text="${product.createAt}"></td>
+        <td th:text="${#numbers.formatCurrency(product.price)}"></td>
+        <td th:text="${#temporals.format(product.createAt, 'dd/MM/yyyy')}"></td>
         <td th:text="${product.category.name}"></td>
         <td><a th:href="@{/form/} + ${product.id}">editar</a></td>
         <td><a th:href="@{/delete/} + ${product.id}" onclick="return confirm('estas seguro que desea eliminar?');">eliminar</a></td>

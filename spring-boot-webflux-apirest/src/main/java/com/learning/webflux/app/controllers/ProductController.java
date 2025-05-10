@@ -2,24 +2,48 @@ package com.learning.webflux.app.controllers;
 
 import com.learning.webflux.app.models.documents.Product;
 import com.learning.webflux.app.models.services.ProductService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import javax.print.attribute.standard.Media;
+import java.io.File;
 import java.net.URI;
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/products")
 public class ProductController {
 
-    private ProductService productService;
+    @Value("${config.uploads.path}")
+    private String pathImages;
+
+    private final ProductService productService;
 
     public ProductController(ProductService productService) {
         this.productService = productService;
+    }
+
+    @PostMapping("/upload/{id}")
+    public Mono<ResponseEntity<Product>> uploadImage(@PathVariable String id, @RequestPart FilePart file) {
+        return productService.findById(id)
+                .flatMap(p -> {
+
+                    String routeImage = file.filename()
+                            .replace(" ", "")
+                            .replace(":", "")
+                            .replace("\\", "");
+                    p.setImage(UUID.randomUUID().toString() + "-" + routeImage);
+
+                    return file.transferTo(new File(pathImages + p.getImage()))
+                            .then(productService.save(p));
+                })
+                .map(ResponseEntity::ok)
+                .defaultIfEmpty(ResponseEntity.notFound().build());
     }
 
     @GetMapping

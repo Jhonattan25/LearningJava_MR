@@ -28,6 +28,27 @@ public class ProductController {
         this.productService = productService;
     }
 
+    @PostMapping("/v2")
+    public Mono<ResponseEntity<Product>> createWithImage(Product product, @RequestPart FilePart file) {
+        if (product.getCreateAt() == null) {
+            product.setCreateAt(LocalDateTime.now());
+        }
+
+        String routeImage = file.filename()
+                .replace(" ", "")
+                .replace(":", "")
+                .replace("\\", "");
+
+        product.setImage(UUID.randomUUID().toString() + "-" + routeImage);
+
+        return file.transferTo(new File(pathImages + product.getImage()))
+                .then(productService.save(product))
+                .map(p -> ResponseEntity
+                        .created(URI.create("/api/products/".concat(p.getId())))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(p));
+    }
+
     @PostMapping("/upload/{id}")
     public Mono<ResponseEntity<Product>> uploadImage(@PathVariable String id, @RequestPart FilePart file) {
         return productService.findById(id)

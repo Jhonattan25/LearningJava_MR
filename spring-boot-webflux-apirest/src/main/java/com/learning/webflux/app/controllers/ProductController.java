@@ -2,17 +2,22 @@ package com.learning.webflux.app.controllers;
 
 import com.learning.webflux.app.models.documents.Product;
 import com.learning.webflux.app.models.services.ProductService;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.support.WebExchangeBindException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.io.File;
 import java.net.URI;
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -90,8 +95,8 @@ public class ProductController {
                 .defaultIfEmpty(ResponseEntity.notFound().build());
     }
 
-    @PostMapping
-    public Mono<ResponseEntity<Product>> create(@RequestBody Product product) {
+    @PostMapping("/old")
+    public Mono<ResponseEntity<Product>> createOld(@RequestBody Product product) {
         if (product.getCreateAt() == null) {
             product.setCreateAt(LocalDateTime.now());
         }
@@ -100,6 +105,46 @@ public class ProductController {
                         .created(URI.create("/api/products/".concat(p.getId())))
                         .contentType(MediaType.APPLICATION_JSON)
                         .body(p));
+    }
+
+    @PostMapping
+    public Mono<ResponseEntity<Map<String, Object>>> createMono(@Valid @RequestBody Mono<Product> monoProduct) {
+
+        Map<String, Object> response = new HashMap<>();
+
+        return monoProduct
+                .flatMap(product -> {
+                    if (product.getCreateAt() == null) {
+                        product.setCreateAt(LocalDateTime.now());
+                    }
+
+                    return productService.save(product)
+                            .map(p -> {
+                                response.put("product", p);
+                                response.put("status", HttpStatus.CREATED.value());
+                                response.put("message", "Producto creado con exito");
+                                response.put("timestamp", LocalDateTime.now());
+                                return p;
+                            })
+                            .map(p -> ResponseEntity
+                                    .created(URI.create("/api/products/".concat(p.getId())))
+                                    .contentType(MediaType.APPLICATION_JSON)
+                                    .body(response));
+                })
+                .onErrorResume(t -> Mono.just(t).cast(WebExchangeBindException.class)
+                        .flatMap(e -> Mono.just(e.getFieldErrors()))
+                        .flatMapMany(Flux::fromIterable)
+                        .map(fieldError -> "El campo " + fieldError.getField() + " " +
+                                fieldError.getDefaultMessage())
+                        .collectList()
+                        .flatMap(list -> {
+                            response.put("errors", list);
+                            response.put("status", HttpStatus.BAD_REQUEST.value());
+                            response.put("message", "Se genero un error");
+                            response.put("timestamp", LocalDateTime.now());
+                            return Mono.just(ResponseEntity.badRequest().body(response));
+                        })
+                );
     }
 
     @PutMapping("/{id}")

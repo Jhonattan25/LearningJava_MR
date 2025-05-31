@@ -1,0 +1,94 @@
+package com.learning.webflux.app.handler;
+
+import com.learning.webflux.app.models.documents.Product;
+import com.learning.webflux.app.models.services.ProductService;
+import org.springframework.http.MediaType;
+import org.springframework.stereotype.Component;
+import org.springframework.web.reactive.function.server.ServerRequest;
+import org.springframework.web.reactive.function.server.ServerResponse;
+import reactor.core.publisher.Mono;
+
+import java.net.URI;
+import java.time.LocalDateTime;
+
+@Component
+public class ProductHandler {
+
+    private final ProductService productService;
+
+    ProductHandler(ProductService productService) {
+        this.productService = productService;
+    }
+
+    public Mono<ServerResponse> list(ServerRequest request) {
+        return ServerResponse.ok()
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(productService.findAll(), Product.class);
+    }
+
+    public Mono<ServerResponse> show(ServerRequest request) {
+
+        String id = request.pathVariable("id");
+
+        return productService.findById(id)
+                .flatMap(p -> ServerResponse
+                        .ok()
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .bodyValue(p))
+                .switchIfEmpty(ServerResponse
+                        .notFound()
+                        .build());
+    }
+
+    public Mono<ServerResponse> create(ServerRequest request) {
+        Mono<Product> product = request.bodyToMono(Product.class);
+
+        return product.flatMap(p -> {
+
+            if (p.getCreateAt() == null) {
+                p.setCreateAt(LocalDateTime.now());
+            }
+
+            return productService.save(p);
+        }).flatMap(p -> ServerResponse.created(URI
+                        .create("/api/v2/products/".concat(p.getId())))
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(p));
+    }
+
+    public Mono<ServerResponse> update(ServerRequest request) {
+
+        String id = request.pathVariable("id");
+        Mono<Product> newProduct = request.bodyToMono(Product.class);
+        Mono<Product> productDb = productService.findById(id);
+
+        return productDb.zipWith(newProduct, (db, req) -> {
+                    db.setName(req.getName());
+                    db.setPrice(req.getPrice());
+                    db.setCategory(req.getCategory());
+                    return db;
+                }).flatMap(p -> ServerResponse
+                        .ok()
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(productService.save(p), Product.class))
+                .switchIfEmpty(ServerResponse
+                        .notFound()
+                        .build());
+    }
+
+    public Mono<ServerResponse> delete(ServerRequest request) {
+
+        String id = request.pathVariable("id");
+
+        Mono<Product> productDb = productService.findById(id);
+
+        return productDb
+                .flatMap(productService::delete)
+                .then(ServerResponse
+                        .noContent()
+                        .build())
+                .switchIfEmpty(ServerResponse
+                        .notFound()
+                        .build());
+    }
+}

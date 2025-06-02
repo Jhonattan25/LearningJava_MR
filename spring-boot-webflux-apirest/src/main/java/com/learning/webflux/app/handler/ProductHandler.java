@@ -8,8 +8,12 @@ import org.springframework.http.MediaType;
 import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.http.codec.multipart.FormFieldPart;
 import org.springframework.stereotype.Component;
+import org.springframework.validation.BeanPropertyBindingResult;
+import org.springframework.validation.Errors;
+import org.springframework.validation.Validator;
 import org.springframework.web.reactive.function.server.ServerRequest;
 import org.springframework.web.reactive.function.server.ServerResponse;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.io.File;
@@ -22,10 +26,13 @@ public class ProductHandler {
 
     private final ProductService productService;
     private final String pathImages;
+    private final Validator validator;
 
-    ProductHandler(ProductService productService, @Value("${config.uploads.path}") String pathImages) {
+    ProductHandler(ProductService productService, @Value("${config.uploads.path}") String pathImages,
+                   Validator validator) {
         this.productService = productService;
         this.pathImages = pathImages;
+        this.validator = validator;
     }
 
     public Mono<ServerResponse> createWithImage(ServerRequest request) {
@@ -122,15 +129,28 @@ public class ProductHandler {
 
         return product.flatMap(p -> {
 
-            if (p.getCreateAt() == null) {
-                p.setCreateAt(LocalDateTime.now());
-            }
+            Errors errors = new BeanPropertyBindingResult(p, Product.class.getName());
+            validator.validate(p, errors);
 
-            return productService.save(p);
-        }).flatMap(p -> ServerResponse.created(URI
-                        .create("/api/v2/products/".concat(p.getId())))
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(p));
+            if (errors.hasErrors()) {
+                return Flux.fromIterable(errors.getFieldErrors())
+                        .map(fieldError -> "The field " + fieldError.getField() + " " + fieldError.getDefaultMessage())
+                        .collectList()
+                        .flatMap(list -> ServerResponse
+                                .badRequest()
+                                .bodyValue(list));
+            } else {
+                if (p.getCreateAt() == null) {
+                    p.setCreateAt(LocalDateTime.now());
+                }
+
+                return productService.save(p)
+                        .flatMap(pdb -> ServerResponse.created(URI
+                                        .create("/api/v2/products/".concat(pdb.getId())))
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .bodyValue(pdb));
+            }
+        });
     }
 
     public Mono<ServerResponse> update(ServerRequest request) {

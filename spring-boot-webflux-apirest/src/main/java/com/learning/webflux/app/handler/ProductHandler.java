@@ -1,23 +1,100 @@
 package com.learning.webflux.app.handler;
 
+import com.learning.webflux.app.models.documents.Category;
 import com.learning.webflux.app.models.documents.Product;
 import com.learning.webflux.app.models.services.ProductService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
+import org.springframework.http.codec.multipart.FilePart;
+import org.springframework.http.codec.multipart.FormFieldPart;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.server.ServerRequest;
 import org.springframework.web.reactive.function.server.ServerResponse;
 import reactor.core.publisher.Mono;
 
+import java.io.File;
 import java.net.URI;
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 @Component
 public class ProductHandler {
 
     private final ProductService productService;
+    private final String pathImages;
 
-    ProductHandler(ProductService productService) {
+    ProductHandler(ProductService productService, @Value("${config.uploads.path}") String pathImages) {
         this.productService = productService;
+        this.pathImages = pathImages;
+    }
+
+    public Mono<ServerResponse> createWithImage(ServerRequest request) {
+        Mono<Product> product = request.multipartData()
+                .map(multipart -> {
+                    FormFieldPart name = (FormFieldPart) multipart.toSingleValueMap().get("name");
+                    FormFieldPart price = (FormFieldPart) multipart.toSingleValueMap().get("price");
+                    FormFieldPart categoryId = (FormFieldPart) multipart.toSingleValueMap().get("category.id");
+                    FormFieldPart categoryName = (FormFieldPart) multipart.toSingleValueMap().get("category.name");
+
+                    Category category = new Category(categoryName.value());
+                    category.setId(categoryId.value());
+
+                    return new Product(name.value(), Double.parseDouble(price.value()), category);
+                });
+
+        return product.flatMap(p -> {
+                    if (p.getCreateAt() == null) {
+                        p.setCreateAt(LocalDateTime.now());
+                    }
+
+                    return Mono.just(p);
+                })
+                .flatMap(p -> request.multipartData()
+                        .map(multipart -> multipart.toSingleValueMap().get("file"))
+                        .cast(FilePart.class)
+                        .flatMap(filePart -> {
+                            String imageName = filePart.filename()
+                                    .replace(" ", "")
+                                    .replace(":", "")
+                                    .replace("\\", "");
+
+                            p.setImage(UUID.randomUUID() + "-" + imageName);
+
+                            return filePart.transferTo(new File(pathImages + p.getImage()))
+                                    .then(productService.save(p));
+                        })
+                )
+                .flatMap(p -> ServerResponse.created(URI
+                                .create("/api/v2/products/".concat(p.getId())))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .bodyValue(p));
+    }
+
+    public Mono<ServerResponse> upload(ServerRequest request) {
+        String id = request.pathVariable("id");
+
+        return request.multipartData()
+                .map(multipart -> multipart.toSingleValueMap().get("file"))
+                .cast(FilePart.class)
+                .flatMap(filePart -> productService.findById(id)
+                        .flatMap(p -> {
+
+                            String imageName = filePart.filename()
+                                    .replace(" ", "")
+                                    .replace(":", "")
+                                    .replace("\\", "");
+
+                            p.setImage(UUID.randomUUID() + "-" + imageName);
+
+                            return filePart.transferTo(new File(pathImages + p.getImage()))
+                                    .then(productService.save(p));
+                        }))
+                .flatMap(p -> ServerResponse.ok()
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .bodyValue(p))
+                .switchIfEmpty(ServerResponse
+                        .notFound()
+                        .build());
     }
 
     public Mono<ServerResponse> list(ServerRequest request) {
